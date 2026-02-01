@@ -253,7 +253,7 @@ class GameManager {
 
     /**
      * Generate random code fragments for the getaway phase
-     * Code length scales with team size: 2 characters per player
+     * Code length scales with team size: 1 character per player
      * Uses only characters available on the keypad: A-H and 1-8
      * @param {number} teamSize - Number of players in the squad
      * @returns {Array}
@@ -261,7 +261,7 @@ class GameManager {
     generateCodeFragments(teamSize) {
         // Only use characters that appear on the keypad
         const keypadChars = 'ABCDEFGH12345678';
-        const codeLength = teamSize * 2; // 2 characters per player
+        const codeLength = teamSize; // 1 character per player
         const fragments = [];
         for (let i = 0; i < codeLength; i++) {
             fragments.push(keypadChars[Math.floor(Math.random() * keypadChars.length)]);
