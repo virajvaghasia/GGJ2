@@ -2,25 +2,6 @@ import { useState, useCallback, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useGameStore } from '../../store/useGameStore';
 
-// Cyber rune symbols
-const RUNES = [
-    '◇', '△', '○',
-    '□', '⬡', '⬢',
-    '◈', '✧', '☆',
-];
-
-const RUNE_COLORS = [
-    'text-cyan-400',
-    'text-pink-400',
-    'text-green-400',
-    'text-yellow-400',
-    'text-red-400',
-    'text-purple-400',
-    'text-blue-400',
-    'text-orange-400',
-    'text-teal-400',
-];
-
 export function SignalJammer() {
     const socket = useGameStore((s) => s.socket);
     const squadAdvance = useGameStore((s) => s.squadAdvance);
@@ -28,42 +9,71 @@ export function SignalJammer() {
     const triggerError = useGameStore((s) => s.triggerError);
     const showSuccess = useGameStore((s) => s.showSuccess);
     const showError = useGameStore((s) => s.showError);
+    const submitSignalJammerGuess = useGameStore((s) => s.submitSignalJammerGuess);
+    const clue = useGameStore((s) => s.clue);
+    const puzzleData = useGameStore((s) => s.puzzleData);
+    const getPuzzle = useGameStore((s) => s.getPuzzle);
+    const getClue = useGameStore((s) => s.getClue);
+    const player = useGameStore((s) => s.player);
 
     const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
     const [wrongGuesses, setWrongGuesses] = useState<Set<number>>(new Set());
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [solved, setSolved] = useState(false);
-    const [clue, setClue] = useState<string | null>(null);
+    const [failedToLoad, setFailedToLoad] = useState(false);
 
-    // Fetch unique clue from server on mount
+    // If player not registered, redirect to lobby
     useEffect(() => {
-        if (socket && !clue) {
-            socket.emit('get_clue', (response: { clue: string | null }) => {
-                console.log('[SIGNAL JAMMER] Received clue:', response.clue);
-                setClue(response.clue);
-            });
+        if (!player) {
+            console.log('[SignalJammer] No player data, redirecting to lobby...');
+            setView('lobby');
         }
-    }, [socket, clue]);
+    }, [player, setView]);
 
-    // Listen for view changes (when another player solves it or squad advances)
+    // Fetch puzzle and clue on mount, with retry logic for timing issues
     useEffect(() => {
-        const handleViewChange = (data: { view: string }) => {
-            if (data.view === 'tumbler') {
-                setSolved(true);
-                triggerSuccess();
+        // Don't fetch if player not registered
+        if (!player) return;
+
+        let retryCount = 0;
+        const maxRetries = 5;
+        let retryTimeout: ReturnType<typeof setTimeout>;
+        let cancelled = false;
+
+        const fetchPuzzle = async () => {
+            if (cancelled) return;
+            
+            await getPuzzle();
+            
+            // Check store state directly (useGameStore.getState() to get fresh value)
+            const currentPuzzleData = useGameStore.getState().puzzleData;
+            
+            if (!currentPuzzleData && retryCount < maxRetries) {
+                retryCount++;
+                console.log(`[SignalJammer] Puzzle not loaded, retrying (${retryCount}/${maxRetries})...`);
+                retryTimeout = setTimeout(fetchPuzzle, 500);
+            } else if (!currentPuzzleData) {
+                // Max retries exceeded, redirect to lobby
+                console.log('[SignalJammer] Failed to load puzzle after retries, redirecting to lobby...');
+                setFailedToLoad(true);
             }
         };
 
-        if (socket) {
-            socket.on('view_change', handleViewChange);
-        }
+        fetchPuzzle();
+        getClue();
 
         return () => {
-            if (socket) {
-                socket.off('view_change', handleViewChange);
-            }
+            cancelled = true;
+            if (retryTimeout) clearTimeout(retryTimeout);
         };
-    }, [socket, triggerSuccess]);
+    }, [getPuzzle, getClue, player]);
+
+    // Redirect to lobby after failed loading
+    useEffect(() => {
+        if (failedToLoad) {
+            setView('lobby');
+        }
+    }, [failedToLoad, setView]);
 
     const handleSymbolClick = useCallback(async (index: number) => {
         if (wrongGuesses.has(index) || isSubmitting || solved || !socket) return;
@@ -71,16 +81,12 @@ export function SignalJammer() {
         setSelectedIndex(index);
         setIsSubmitting(true);
 
-        // Send guess to server for validation
-        socket.emit('signal_jammer_guess', { symbolIndex: index }, (result: { success: boolean }) => {
-            if (result.success) {
-                triggerSuccess();
-                setSolved(true);
+        // Submit guess to server for validation
+        const result = await submitSignalJammerGuess(index);
 
-                // Haptic feedback for success
-                if (navigator.vibrate) {
-                    navigator.vibrate([50, 50, 100, 50, 150]);
-                }
+        if (result.success) {
+            triggerSuccess();
+            setSolved(true);
 
                 // Advance the entire squad to next minigame
                 setTimeout(() => {
@@ -97,11 +103,27 @@ export function SignalJammer() {
                 }
             }
 
-            setIsSubmitting(false);
-            setSelectedIndex(null);
-        });
-    }, [wrongGuesses, isSubmitting, solved, socket, triggerSuccess, triggerError, squadAdvance]);
+        setIsSubmitting(false);
+        setSelectedIndex(null);
+    }, [wrongGuesses, isSubmitting, solved, triggerSuccess, triggerError, setView, submitSignalJammerGuess]);
 
+    // Show loading if puzzle not yet loaded
+    if (!puzzleData) {
+        return (
+            <div className="min-h-screen bg-slate-900 cyber-grid flex items-center justify-center">
+                <motion.div
+                    animate={{ opacity: [0.5, 1, 0.5] }}
+                    transition={{ duration: 1.5, repeat: Infinity }}
+                    className="text-cyan-400 text-xl"
+                >
+                    Loading puzzle...
+                </motion.div>
+            </div>
+        );
+    }
+
+    const grid = puzzleData.grid;
+    const puzzleName = puzzleData.name || 'SIGNAL JAMMER';
     const maxTries = 8;
     const triesLeft = maxTries - wrongGuesses.size;
 
@@ -156,7 +178,7 @@ export function SignalJammer() {
                 className="text-center mb-4"
             >
                 <h1 className="text-xl font-bold text-cyan-400 text-glow-cyan tracking-widest">
-                    SIGNAL JAMMER
+                    {puzzleName.toUpperCase()}
                 </h1>
                 <p className="text-slate-400 text-sm mt-1">DECODE THE FREQUENCY</p>
             </motion.div>
@@ -171,25 +193,22 @@ export function SignalJammer() {
                 <p className="text-pink-400 text-xs uppercase tracking-wider mb-1">
                     YOUR INTEL:
                 </p>
-                {clue ? (
-                    <p className="text-white font-mono text-sm">
-                        "{clue}"
-                    </p>
-                ) : (
-                    <p className="text-slate-500 text-sm animate-pulse">
-                        Receiving transmission...
-                    </p>
-                )}
+                <p className="text-white font-mono text-sm">
+                    "{clue || 'Loading clue...'}"
+                </p>
+                <p className="text-slate-500 text-xs mt-2 italic">
+                    💡 Communicate with your squad to find the answer
+                </p>
             </motion.div>
 
-            {/* 3x3 Grid of Runes */}
+            {/* 3x3 Grid of Symbols */}
             <motion.div
                 initial={{ scale: 0.8, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
                 transition={{ delay: 0.2 }}
                 className="grid grid-cols-3 gap-3 max-w-xs mx-auto mb-6"
             >
-                {RUNES.map((rune, index) => {
+                {grid.map((cell, index) => {
                     const isWrong = wrongGuesses.has(index);
                     const isSelected = selectedIndex === index;
                     const isCorrect = solved && isSelected;
@@ -220,13 +239,13 @@ export function SignalJammer() {
                 ${isCorrect
                                     ? 'bg-green-500/30 border-green-400 glow-cyan'
                                     : isWrong
-                                        ? 'bg-red-900/20 border-red-500/30 text-red-500/30 cursor-not-allowed'
+                                        ? 'bg-red-900/20 border-red-500/30 cursor-not-allowed'
                                         : isSelected
                                             ? 'bg-cyan-500/30 border-cyan-400 glow-cyan'
                                             : 'bg-slate-800/50 border-slate-600 hover:border-cyan-400/50'
                                 }
-                ${RUNE_COLORS[index]}
               `}
+                            style={{ color: isWrong ? 'rgba(239, 68, 68, 0.3)' : cell.color }}
                         >
                             <motion.span
                                 animate={isSelected ? {
@@ -235,7 +254,7 @@ export function SignalJammer() {
                                 } : {}}
                                 transition={{ duration: 0.3 }}
                             >
-                                {rune}
+                                {cell.symbol}
                             </motion.span>
 
                             {/* Wrong indicator */}
@@ -265,7 +284,7 @@ export function SignalJammer() {
                 </p>
                 {wrongGuesses.size > 0 && (
                     <p className="text-red-400 text-xs mt-1">
-                        Eliminated: {Array.from(wrongGuesses).map(i => RUNES[i]).join(' ')}
+                        Eliminated: {Array.from(wrongGuesses).map(i => grid[i]?.symbol || '?').join(' ')}
                     </p>
                 )}
             </motion.div>

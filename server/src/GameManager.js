@@ -5,6 +5,7 @@
 
 import { v4 as uuidv4 } from 'uuid';
 import Squad from './Squad.js';
+import { PUZZLES, getRandomPuzzle } from './puzzleData.js';
 
 // Game prompts for the lobby phase
 const PROMPTS = [
@@ -90,6 +91,9 @@ class GameManager {
                 squad.removePlayer(socketId);
             }
         }
+
+        // Remove player's drawing from the drawings array
+        this.drawings = this.drawings.filter(d => d.id !== socketId);
 
         this.players.delete(socketId);
     }
@@ -286,11 +290,18 @@ class GameManager {
         this.phase = newPhase;
 
         if (newPhase === 'heist') {
-            // Initialize code fragments for each squad
+            // Initialize code fragments and assign puzzles for each squad
             // Code length is based on squad size (1 char per player)
             this.squads.forEach((squad, squadId) => {
                 const teamSize = squad.players.length;
                 this.codeFragments.set(squadId, this.generateCodeFragments(teamSize));
+                
+                // Assign a random puzzle to this squad
+                const puzzle = getRandomPuzzle();
+                squad.puzzleId = puzzle.id;
+                squad.correctSymbol = puzzle.correctIndex;
+                console.log(`[HEIST] Squad ${squadId} assigned puzzle: ${puzzle.id} (answer: ${puzzle.correctIndex})`);
+                
                 squad.setMinigame('signal_jammer');
                 squad.setView('signal_jammer');
 

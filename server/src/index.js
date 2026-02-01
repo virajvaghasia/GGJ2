@@ -9,6 +9,8 @@ import cors from 'cors';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import GameManager from './GameManager.js';
+import { getPuzzleById, getRandomPuzzle } from './puzzleData.js';
+
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -226,25 +228,86 @@ io.on('connection', (socket) => {
     socket.on('get_clue', (callback) => {
         const player = gameManager.players.get(socket.id);
         if (!player || !player.squad) {
+            console.log(`[GET_CLUE] No player or squad for ${socket.id}`);
             callback({ clue: null });
             return;
         }
 
         const squad = gameManager.squads.get(player.squad);
         if (!squad) {
+            console.log(`[GET_CLUE] Squad ${player.squad} not found`);
             callback({ clue: null });
             return;
         }
 
-        // Get unique clue for this player from pre-generated clues
-        const playerIndex = squad.players.findIndex(p => p.id === socket.id);
-        const clue = squad.clues && squad.clues[playerIndex]
-            ? squad.clues[playerIndex]
-            : 'Communicate with your squad to find the symbol';
+        // If no puzzle assigned yet, assign one now (handles race conditions)
+        if (!squad.puzzleId) {
+            const puzzle = getRandomPuzzle();
+            squad.puzzleId = puzzle.id;
+            squad.correctSymbol = puzzle.correctIndex;
+            console.log(`[GET_CLUE] Assigned puzzle ${puzzle.id} to squad ${player.squad} on-demand`);
+        }
 
-        console.log(`[CLUE] Player ${socket.id} (index ${playerIndex}) got clue: ${clue}`);
+        // Get the puzzle assigned to this squad
+        const puzzle = getPuzzleById(squad.puzzleId);
+        if (!puzzle) {
+            console.log(`[GET_CLUE] Puzzle ${squad.puzzleId} not found`);
+            callback({ clue: null });
+            return;
+        }
+
+        // Generate unique clue for this player based on their index in the squad
+        const playerIndex = squad.players.findIndex(p => p.id === socket.id);
+        const clue = puzzle.clues[playerIndex % puzzle.clues.length];
+        
+        console.log(`[GET_CLUE] Returning clue for player ${playerIndex} in squad ${player.squad}`);
         callback({ clue });
     });
+
+    // Get puzzle data for Signal Jammer (grid, colors, puzzle name)
+    socket.on('get_puzzle', (callback) => {
+        const player = gameManager.players.get(socket.id);
+        if (!player || !player.squad) {
+            console.log(`[GET_PUZZLE] No player or squad for ${socket.id}`);
+            callback({ puzzle: null });
+            return;
+        }
+
+        const squad = gameManager.squads.get(player.squad);
+        if (!squad) {
+            console.log(`[GET_PUZZLE] Squad ${player.squad} not found`);
+            callback({ puzzle: null });
+            return;
+        }
+
+        // If no puzzle assigned yet, assign one now (handles race conditions)
+        if (!squad.puzzleId) {
+            const puzzle = getRandomPuzzle();
+            squad.puzzleId = puzzle.id;
+            squad.correctSymbol = puzzle.correctIndex;
+            console.log(`[GET_PUZZLE] Assigned puzzle ${puzzle.id} to squad ${player.squad} on-demand`);
+        }
+
+        // Get the puzzle assigned to this squad
+        const puzzle = getPuzzleById(squad.puzzleId);
+        if (!puzzle) {
+            console.log(`[GET_PUZZLE] Puzzle ${squad.puzzleId} not found in database`);
+            callback({ puzzle: null });
+            return;
+        }
+
+        console.log(`[GET_PUZZLE] Returning puzzle ${puzzle.id} for squad ${player.squad}`);
+        
+        // Send puzzle data (grid and name) but NOT the correct answer
+        callback({
+            puzzle: {
+                id: puzzle.id,
+                name: puzzle.name,
+                grid: puzzle.grid,
+            }
+        });
+    });
+
 
     // Getaway code verification
     socket.on('verify_code', (data, callback) => {
@@ -333,7 +396,15 @@ io.on('connection', (socket) => {
         }
 
         console.log(`[SQUAD_ADVANCE] Squad ${player.squad} advancing to: ${data.view}`);
-
+        
+        // If advancing to signal_jammer, ensure puzzle is assigned
+        if (data.view === 'signal_jammer' && !squad.puzzleId) {
+            const puzzle = getRandomPuzzle();
+            squad.puzzleId = puzzle.id;
+            squad.correctSymbol = puzzle.correctIndex;
+            console.log(`[SQUAD_ADVANCE] Assigned puzzle ${puzzle.id} to squad ${player.squad}`);
+        }
+        
         // Track the view change
         squad.setView(data.view);
 
@@ -415,6 +486,49 @@ io.on('connection', (socket) => {
         console.log(`[FRAGMENT] Squad ${squadId}: Assigned position ${assignment.position}/${codeLength} (${assignment.char}) to ${socket.id}`);
 
         callback(assignment);
+    });
+
+    // Get tumbler configuration (random sweet spot angle per player) - PER SQUAD
+    socket.on('get_tumbler_config', (callback) => {
+        const player = gameManager.players.get(socket.id);
+        if (!player || !player.squad) {
+            callback({ sweetSpotAngle: 45 }); // fallback
+            return;
+        }
+
+        const squad = gameManager.squads.get(player.squad);
+        if (!squad) {
+            callback({ sweetSpotAngle: 45 }); // fallback
+            return;
+        }
+
+        const squadId = player.squad;
+
+        // Initialize per-squad tumbler angle tracking
+        if (!global.squadTumblerAngles) {
+            global.squadTumblerAngles = new Map(); // squadId -> Map of player angles
+        }
+
+        if (!global.squadTumblerAngles.has(squadId)) {
+            global.squadTumblerAngles.set(squadId, new Map());
+        }
+
+        const squadAngles = global.squadTumblerAngles.get(squadId);
+
+        // Check if player already has an assigned angle
+        if (squadAngles.has(socket.id)) {
+            const angle = squadAngles.get(socket.id);
+            console.log(`[TUMBLER] Player ${socket.id} retrieving existing angle: ${angle}°`);
+            callback({ sweetSpotAngle: angle });
+            return;
+        }
+
+        // Generate a random angle between 0 and 359
+        const randomAngle = Math.floor(Math.random() * 360);
+        squadAngles.set(socket.id, randomAngle);
+        console.log(`[TUMBLER] Squad ${squadId}: Assigned angle ${randomAngle}° to player ${socket.id}`);
+
+        callback({ sweetSpotAngle: randomAngle });
     });
 
     // Tumbler state tracking for sync - PER SQUAD
@@ -561,11 +675,6 @@ gmNamespace.on('connection', (socket) => {
         gmNamespace.emit('game_state', gameManager.getGameState());
     });
 
-    socket.on('start_heist', () => {
-        gameManager.setPhase('heist');
-        gmNamespace.emit('game_state', gameManager.getGameState());
-    });
-
     socket.on('reset_game', () => {
         gameManager.resetGame();
 
@@ -573,6 +682,7 @@ gmNamespace.on('connection', (socket) => {
         if (global.squadTumblerStates) global.squadTumblerStates.clear();
         if (global.squadTumblerSyncStart) global.squadTumblerSyncStart.clear();
         if (global.squadFragments) global.squadFragments.clear();
+        if (global.squadTumblerAngles) global.squadTumblerAngles.clear();
 
         io.emit('game_reset');
         gmNamespace.emit('game_state', gameManager.getGameState());

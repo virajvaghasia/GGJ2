@@ -19,6 +19,8 @@ class Squad {
         this.completedAt = null; // Timestamp when squad completed the heist
         this.finishPosition = null; // 1st, 2nd, 3rd, etc.
         this.tasksCompleted = 0; // Number of minigame tasks completed
+        this.puzzleId = null; // ID of the Signal Jammer puzzle assigned to this squad
+        this.correctSymbol = 0; // Index of correct symbol for Signal Jammer
     }
 
     /**

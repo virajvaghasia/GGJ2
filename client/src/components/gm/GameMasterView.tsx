@@ -103,6 +103,7 @@ export function GameMasterView() {
             setGameState((prev) => ({
                 ...prev,
                 playerCount: data.count,
+                drawings: prev.drawings.filter((d) => d.id !== data.id),
             }));
         });
 
@@ -145,9 +146,6 @@ export function GameMasterView() {
         socket?.emit('start_game');
     }, [socket]);
 
-    const startHeist = useCallback(() => {
-        socket?.emit('start_heist');
-    }, [socket]);
 
     const resetGame = useCallback(() => {
         socket?.emit('reset_game');
@@ -196,16 +194,6 @@ export function GameMasterView() {
                         {/* Control buttons - only show after start/tutorial */}
                         {gameState.phase !== 'start' && gameState.phase !== 'tutorial' && (
                             <div className="flex gap-2">
-                                {gameState.phase === 'chain' && (
-                                    <motion.button
-                                        whileHover={{ scale: 1.05 }}
-                                        whileTap={{ scale: 0.95 }}
-                                        onClick={startHeist}
-                                        className="px-4 py-2 bg-pink-500/20 border border-pink-400 text-pink-400 font-bold"
-                                    >
-                                        START HEIST
-                                    </motion.button>
-                                )}
                                 <motion.button
                                     whileHover={{ scale: 1.05 }}
                                     whileTap={{ scale: 0.95 }}
@@ -478,16 +466,18 @@ export function GameMasterView() {
                                             {/* Circular network visualization */}
                                             <div className="relative w-32 h-32 mx-auto mb-4">
                                                 {/* Connection lines */}
-                                                <svg className="absolute inset-0 w-full h-full">
+                                                <svg className="absolute inset-0 w-full h-full" viewBox="0 0 100 100">
                                                     {squad.players.map((_, pIndex) => {
                                                         const nextIndex = (pIndex + 1) % squad.players.length;
                                                         const angle1 = (pIndex / squad.players.length) * 2 * Math.PI - Math.PI / 2;
                                                         const angle2 = (nextIndex / squad.players.length) * 2 * Math.PI - Math.PI / 2;
-                                                        const r = 50;
-                                                        const x1 = 64 + r * Math.cos(angle1);
-                                                        const y1 = 64 + r * Math.sin(angle1);
-                                                        const x2 = 64 + r * Math.cos(angle2);
-                                                        const y2 = 64 + r * Math.sin(angle2);
+                                                        const r = 40; // radius in viewBox units (percentage-like)
+                                                        const cx = 50; // center x
+                                                        const cy = 50; // center y
+                                                        const x1 = cx + r * Math.cos(angle1);
+                                                        const y1 = cy + r * Math.sin(angle1);
+                                                        const x2 = cx + r * Math.cos(angle2);
+                                                        const y2 = cy + r * Math.sin(angle2);
 
                                                         const scanComplete = pIndex < squad.completedScans;
 
@@ -514,9 +504,11 @@ export function GameMasterView() {
                                                 {/* Player nodes */}
                                                 {squad.players.map((player, pIndex) => {
                                                     const angle = (pIndex / squad.players.length) * 2 * Math.PI - Math.PI / 2;
-                                                    const r = 50;
-                                                    const x = 50 + r * Math.cos(angle);
-                                                    const y = 50 + r * Math.sin(angle);
+                                                    const r = 40; // Same radius as SVG (percentage)
+                                                    const cx = 50; // center percentage
+                                                    const cy = 50; // center percentage
+                                                    const x = cx + r * Math.cos(angle);
+                                                    const y = cy + r * Math.sin(angle);
 
                                                     return (
                                                         <motion.div

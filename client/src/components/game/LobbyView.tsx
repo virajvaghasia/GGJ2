@@ -3,16 +3,15 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Button } from '../ui/Button';
 import { useGameStore } from '../../store/useGameStore';
 
-// Random prompts
+// Random prompts - visual/descriptive for identifying players
 const PROMPTS = [
-    "My most recognizable feature is…",
-    "People always confuse me for…",
-    "I am absolutely NOT…",
-    "My secret talent is…",
-    "If I were a superhero, my power would be…",
-    "The strangest thing about me is…",
-    "You'll never guess that I…",
-    "My friends describe me as…",
+    "Describe your outfit today…",
+    "What color are you wearing?",
+    "Describe your hairstyle…",
+    "What accessories are you wearing?",
+    "What's the most noticeable thing about your look?",
+    "Describe what you're wearing…",
+    "What pattern or design is on your clothes?",
 ];
 
 export function LobbyView() {
@@ -27,7 +26,7 @@ export function LobbyView() {
     const [hasDrawn, setHasDrawn] = useState(false);
     const [loading, setLoading] = useState(false);
     const [brushColor, setBrushColor] = useState('#22d3ee');
-    const [brushSize, setBrushSize] = useState(8);
+    const [brushSize, setBrushSize] = useState(2);
 
     // Initialize canvas
     useEffect(() => {
@@ -185,7 +184,7 @@ export function LobbyView() {
                 className="mb-4"
             >
                 <label className="block text-cyan-400 text-xs mb-1 uppercase tracking-wider">
-                    Draw Your Mask
+                    Draw Yourself
                 </label>
                 <div className="relative">
                     <canvas
