@@ -41,6 +41,57 @@ export function Tumbler({
     });
     const [completed, setCompleted] = useState(false);
     const [permissionGranted, setPermissionGranted] = useState(false);
+    const [permissionError, setPermissionError] = useState<string | null>(null);
+    const [isPermanentlyDenied, setIsPermanentlyDenied] = useState(false);
+    const [isLandscape, setIsLandscape] = useState(false);
+
+    // Check if device is in landscape mode
+    useEffect(() => {
+        const checkOrientation = () => {
+            // Check if window width is greater than height (landscape)
+            const isLandscapeMode = window.innerWidth > window.innerHeight;
+            setIsLandscape(isLandscapeMode);
+        };
+
+        // Check immediately
+        checkOrientation();
+
+        // Listen for orientation/resize changes
+        window.addEventListener('resize', checkOrientation);
+        window.addEventListener('orientationchange', checkOrientation);
+
+        return () => {
+            window.removeEventListener('resize', checkOrientation);
+            window.removeEventListener('orientationchange', checkOrientation);
+        };
+    }, []);
+
+    // Lock screen orientation to portrait on mount (works on Android only)
+    useEffect(() => {
+        const lockOrientation = async () => {
+            try {
+                // Type assertion for experimental API
+                const screenOrientation = screen.orientation as any;
+                if (screenOrientation && screenOrientation.lock) {
+                    await screenOrientation.lock('portrait').catch((err: Error) => {
+                        console.log('[TUMBLER] Orientation lock not supported:', err);
+                    });
+                }
+            } catch (err) {
+                console.log('[TUMBLER] Orientation lock failed:', err);
+            }
+        };
+        
+        lockOrientation();
+        
+        return () => {
+            // Unlock orientation when component unmounts
+            const screenOrientation = screen.orientation as any;
+            if (screenOrientation && screenOrientation.unlock) {
+                screenOrientation.unlock();
+            }
+        };
+    }, []);
 
     // Fetch sweet spot angle from server on mount
     useEffect(() => {
@@ -89,7 +140,7 @@ export function Tumbler({
 
         // Extra haptic near center
         const now = Date.now();
-        if (atSweetSpot && now - lastVibrationRef.current > 500) {
+        if (atSweetSpot && sweetSpotAngle !== null && now - lastVibrationRef.current > 500) {
             const normalizedAngle2 = ((angle % 360) + 360) % 360;
             const normalizedSweet2 = ((sweetSpotAngle % 360) + 360) % 360;
             let diff = Math.abs(normalizedAngle2 - normalizedSweet2);
@@ -107,17 +158,39 @@ export function Tumbler({
 
     // Request permission for iOS
     const requestPermission = async () => {
+        setPermissionError(null); // Clear any previous errors
+        
         if (typeof (DeviceOrientationEvent as any).requestPermission === 'function') {
             try {
                 const permission = await (DeviceOrientationEvent as any).requestPermission();
                 if (permission === 'granted') {
                     window.addEventListener('deviceorientation', handleOrientation);
                     setPermissionGranted(true);
+                    setPermissionError(null);
+                    setIsPermanentlyDenied(false);
+                } else {
+                    // Permission denied - on iOS this is permanent until manually reset
+                    setIsPermanentlyDenied(true);
+                    setPermissionError('denied');
+                    console.warn('DeviceOrientation permission denied');
                 }
             } catch (error) {
-                console.error('DeviceOrientation permission denied:', error);
+                // User cancelled the prompt (DOMException) or other error
+                // On iOS, if user already denied before, this won't even show the prompt
+                // and will immediately throw an error
+                console.error('DeviceOrientation permission error:', error);
+                
+                // Check if this is a NotAllowedError (permission previously denied)
+                if (error instanceof DOMException && error.name === 'NotAllowedError') {
+                    setIsPermanentlyDenied(true);
+                    setPermissionError('denied');
+                } else {
+                    // User just cancelled this time
+                    setPermissionError('cancelled');
+                }
             }
         } else {
+            // Non-iOS device
             window.addEventListener('deviceorientation', handleOrientation);
             setPermissionGranted(true);
         }
@@ -222,6 +295,37 @@ export function Tumbler({
                 )}
             </AnimatePresence>
 
+            {/* Landscape mode overlay - iOS workaround since orientation lock isn't supported */}
+            <AnimatePresence>
+                {isLandscape && (
+                    <motion.div
+                        initial={{ opacity: 0 }}
+                        animate={{ opacity: 1 }}
+                        exit={{ opacity: 0 }}
+                        className="fixed inset-0 bg-slate-900 flex flex-col items-center justify-center z-50"
+                    >
+                        <motion.div
+                            animate={{ rotate: [0, -90, -90, 0] }}
+                            transition={{ 
+                                duration: 2, 
+                                repeat: Infinity, 
+                                repeatDelay: 0.5,
+                                times: [0, 0.25, 0.75, 1]
+                            }}
+                            className="text-6xl mb-6"
+                        >
+                            📱
+                        </motion.div>
+                        <p className="text-pink-400 text-xl font-bold tracking-widest text-center px-4">
+                            ROTATE YOUR DEVICE
+                        </p>
+                        <p className="text-slate-400 text-sm mt-2 text-center px-4">
+                            This game requires portrait mode, turn off auto-rotate
+                        </p>
+                    </motion.div>
+                )}
+            </AnimatePresence>
+
             {/* Header */}
             <motion.div
                 initial={{ y: -20, opacity: 0 }}
@@ -267,16 +371,72 @@ export function Tumbler({
                 </div>
             </motion.div>
 
-            {/* Permission button */}
+            {/* Permission button and error messages */}
             {!permissionGranted && (
-                <motion.button
-                    initial={{ opacity: 0 }}
-                    animate={{ opacity: 1 }}
-                    onClick={requestPermission}
-                    className="mb-4 px-4 py-2 bg-cyan-500/20 border border-cyan-400 text-cyan-400 text-sm"
-                >
-                    TAP TO ENABLE MOTION
-                </motion.button>
+                <div className="text-center mb-4 max-w-md mx-auto">
+                    {isPermanentlyDenied ? (
+                        // Permanently denied - show instructions for manual fix
+                        <motion.div
+                            initial={{ opacity: 0, y: -10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="bg-red-500/10 border-2 border-red-400 rounded-lg p-4"
+                        >
+                            <p className="text-red-400 font-bold mb-2">⚠️ Motion Permission Denied</p>
+                            <p className="text-slate-300 text-sm mb-3">
+                                To play this game, you need to enable Motion & Orientation in Safari settings:
+                            </p>
+                            <ol className="text-left text-slate-300 text-xs space-y-2 mb-3">
+                                <li className="flex gap-2">
+                                    <span className="text-cyan-400 font-bold">1.</span>
+                                    <span>Open <strong>Settings</strong> app on your iPhone</span>
+                                </li>
+                                <li className="flex gap-2">
+                                    <span className="text-cyan-400 font-bold">2.</span>
+                                    <span>Scroll down and tap <strong>Safari</strong></span>
+                                </li>
+                                <li className="flex gap-2">
+                                    <span className="text-cyan-400 font-bold">3.</span>
+                                    <span>Scroll down to find <strong>Motion & Orientation Access</strong></span>
+                                </li>
+                                <li className="flex gap-2">
+                                    <span className="text-cyan-400 font-bold">4.</span>
+                                    <span>Toggle it <strong>ON</strong></span>
+                                </li>
+                                <li className="flex gap-2">
+                                    <span className="text-cyan-400 font-bold">5.</span>
+                                    <span>Come back to this page and refresh</span>
+                                </li>
+                            </ol>
+                            <button
+                                onClick={() => window.location.reload()}
+                                className="w-full px-4 py-2 bg-cyan-500/20 border border-cyan-400 text-cyan-400 text-sm hover:bg-cyan-500/30 transition-colors"
+                            >
+                                REFRESH PAGE
+                            </button>
+                        </motion.div>
+                    ) : (
+                        // Not yet requested or user cancelled temporarily
+                        <>
+                            <motion.button
+                                initial={{ opacity: 0 }}
+                                animate={{ opacity: 1 }}
+                                onClick={requestPermission}
+                                className="px-4 py-2 bg-cyan-500/20 border border-cyan-400 text-cyan-400 text-sm hover:bg-cyan-500/30 transition-colors"
+                            >
+                                TAP TO ENABLE MOTION
+                            </motion.button>
+                            {permissionError === 'cancelled' && (
+                                <motion.p
+                                    initial={{ opacity: 0 }}
+                                    animate={{ opacity: 1 }}
+                                    className="text-yellow-400 text-xs mt-2"
+                                >
+                                    Motion permission required to play. Tap button to try again.
+                                </motion.p>
+                            )}
+                        </>
+                    )}
+                </div>
             )}
 
             {/* Dial Container */}

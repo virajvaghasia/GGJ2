@@ -10,7 +10,7 @@ const PROMPTS = [
     "Describe your hairstyle…",
     "What accessories are you wearing?",
     "What's the most noticeable thing about your look?",
-    "Describe what you're wearing on top…",
+    "Describe what you're wearing…",
     "What pattern or design is on your clothes?",
 ];
 
