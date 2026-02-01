@@ -9,6 +9,8 @@ import cors from 'cors';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import GameManager from './GameManager.js';
+import { getPuzzleById, getRandomPuzzle } from './puzzleData.js';
+
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -174,28 +176,86 @@ io.on('connection', (socket) => {
     socket.on('get_clue', (callback) => {
         const player = gameManager.players.get(socket.id);
         if (!player || !player.squad) {
+            console.log(`[GET_CLUE] No player or squad for ${socket.id}`);
             callback({ clue: null });
             return;
         }
 
         const squad = gameManager.squads.get(player.squad);
         if (!squad) {
+            console.log(`[GET_CLUE] Squad ${player.squad} not found`);
             callback({ clue: null });
             return;
         }
 
-        // Generate unique clue for this player
-        const playerIndex = squad.players.findIndex(p => p.id === socket.id);
-        const clues = [
-            'It is NOT in the first row',
-            'It is NOT in the first column',
-            'It is NOT red',
-            'It is in the center area',
-            'It has a sharp angle',
-        ];
+        // If no puzzle assigned yet, assign one now (handles race conditions)
+        if (!squad.puzzleId) {
+            const puzzle = getRandomPuzzle();
+            squad.puzzleId = puzzle.id;
+            squad.correctSymbol = puzzle.correctIndex;
+            console.log(`[GET_CLUE] Assigned puzzle ${puzzle.id} to squad ${player.squad} on-demand`);
+        }
 
-        callback({ clue: clues[playerIndex % clues.length] });
+        // Get the puzzle assigned to this squad
+        const puzzle = getPuzzleById(squad.puzzleId);
+        if (!puzzle) {
+            console.log(`[GET_CLUE] Puzzle ${squad.puzzleId} not found`);
+            callback({ clue: null });
+            return;
+        }
+
+        // Generate unique clue for this player based on their index in the squad
+        const playerIndex = squad.players.findIndex(p => p.id === socket.id);
+        const clue = puzzle.clues[playerIndex % puzzle.clues.length];
+        
+        console.log(`[GET_CLUE] Returning clue for player ${playerIndex} in squad ${player.squad}`);
+        callback({ clue });
     });
+
+    // Get puzzle data for Signal Jammer (grid, colors, puzzle name)
+    socket.on('get_puzzle', (callback) => {
+        const player = gameManager.players.get(socket.id);
+        if (!player || !player.squad) {
+            console.log(`[GET_PUZZLE] No player or squad for ${socket.id}`);
+            callback({ puzzle: null });
+            return;
+        }
+
+        const squad = gameManager.squads.get(player.squad);
+        if (!squad) {
+            console.log(`[GET_PUZZLE] Squad ${player.squad} not found`);
+            callback({ puzzle: null });
+            return;
+        }
+
+        // If no puzzle assigned yet, assign one now (handles race conditions)
+        if (!squad.puzzleId) {
+            const puzzle = getRandomPuzzle();
+            squad.puzzleId = puzzle.id;
+            squad.correctSymbol = puzzle.correctIndex;
+            console.log(`[GET_PUZZLE] Assigned puzzle ${puzzle.id} to squad ${player.squad} on-demand`);
+        }
+
+        // Get the puzzle assigned to this squad
+        const puzzle = getPuzzleById(squad.puzzleId);
+        if (!puzzle) {
+            console.log(`[GET_PUZZLE] Puzzle ${squad.puzzleId} not found in database`);
+            callback({ puzzle: null });
+            return;
+        }
+
+        console.log(`[GET_PUZZLE] Returning puzzle ${puzzle.id} for squad ${player.squad}`);
+        
+        // Send puzzle data (grid and name) but NOT the correct answer
+        callback({
+            puzzle: {
+                id: puzzle.id,
+                name: puzzle.name,
+                grid: puzzle.grid,
+            }
+        });
+    });
+
 
     // Getaway code verification
     socket.on('verify_code', (data, callback) => {
@@ -284,7 +344,15 @@ io.on('connection', (socket) => {
         }
 
         console.log(`[SQUAD_ADVANCE] Squad ${player.squad} advancing to: ${data.view}`);
-
+        
+        // If advancing to signal_jammer, ensure puzzle is assigned
+        if (data.view === 'signal_jammer' && !squad.puzzleId) {
+            const puzzle = getRandomPuzzle();
+            squad.puzzleId = puzzle.id;
+            squad.correctSymbol = puzzle.correctIndex;
+            console.log(`[SQUAD_ADVANCE] Assigned puzzle ${puzzle.id} to squad ${player.squad}`);
+        }
+        
         // Track the view change
         squad.setView(data.view);
 
@@ -552,11 +620,6 @@ gmNamespace.on('connection', (socket) => {
         if (!result.success) {
             socket.emit('phase_error', { message: result.message });
         }
-        gmNamespace.emit('game_state', gameManager.getGameState());
-    });
-
-    socket.on('start_heist', () => {
-        gameManager.setPhase('heist');
         gmNamespace.emit('game_state', gameManager.getGameState());
     });
 

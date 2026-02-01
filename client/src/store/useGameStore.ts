@@ -32,6 +32,17 @@ export interface ClueData {
     clue: string;
 }
 
+export interface PuzzleCell {
+    symbol: string;
+    color: string;
+}
+
+export interface PuzzleData {
+    id: string;
+    name: string;
+    grid: PuzzleCell[];
+}
+
 export interface SquadStatus {
     confirmedCount: number;
     totalCount: number;
@@ -64,6 +75,7 @@ export interface GameState {
 
     // Minigame Data
     clue: string | null;
+    puzzleData: PuzzleData | null;
     codeFragments: string[];
 
     // Result Data
@@ -90,6 +102,7 @@ export interface GameState {
 
     // Minigames
     getClue: () => Promise<void>;
+    getPuzzle: () => Promise<void>;
     submitSignalJammerGuess: (symbolIndex: number) => Promise<{ success: boolean }>;
     updateTumblerState: (state: { angle: number; atSweetSpot: boolean }) => void;
 
@@ -127,6 +140,7 @@ export const useGameStore = create<GameState>((set, get) => ({
     squad: null,
     squadStatus: null,
     clue: null,
+    puzzleData: null,
     codeFragments: [],
     heistResult: null,
     isScanning: false,
@@ -163,6 +177,7 @@ export const useGameStore = create<GameState>((set, get) => ({
             } else if (data.phase === 'heist') {
                 set({ currentView: 'signal_jammer' });
                 get().getClue();
+                get().getPuzzle();
             } else if (data.phase === 'getaway') {
                 set({ currentView: 'getaway' });
             }
@@ -317,6 +332,18 @@ export const useGameStore = create<GameState>((set, get) => ({
         return new Promise((resolve) => {
             socket.emit('get_clue', (response: { clue: string }) => {
                 set({ clue: response.clue });
+                resolve();
+            });
+        });
+    },
+
+    getPuzzle: async () => {
+        const { socket } = get();
+        if (!socket) return;
+
+        return new Promise((resolve) => {
+            socket.emit('get_puzzle', (response: { puzzle: PuzzleData | null }) => {
+                set({ puzzleData: response.puzzle });
                 resolve();
             });
         });
