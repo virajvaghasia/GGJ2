@@ -15,6 +15,7 @@ export function SignalJammer() {
     const getPuzzle = useGameStore((s) => s.getPuzzle);
     const getClue = useGameStore((s) => s.getClue);
     const player = useGameStore((s) => s.player);
+    const setView = useGameStore((s) => s.setView);
 
     const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
     const [wrongGuesses, setWrongGuesses] = useState<Set<number>>(new Set());
@@ -41,6 +42,7 @@ export function SignalJammer() {
         let cancelled = false;
 
         const fetchPuzzle = async () => {
+             console.log('[SignalJammer] Fetching puzzle...');
             if (cancelled) return;
             
             await getPuzzle();

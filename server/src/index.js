@@ -384,7 +384,11 @@ io.on('connection', (socket) => {
         }
 
         // Check if ALL squad members have confirmed their scans
-        const allConfirmed = squad.players.every(p => p.scanComplete);
+        // Use getCompletedScans() to match client-side logic and scanMap source of truth
+        const confirmedCount = squad.getCompletedScans();
+        const totalCount = squad.players.length;
+        const allConfirmed = confirmedCount === totalCount;
+        
         if (!allConfirmed) {
             console.log(`[SQUAD_ADVANCE] Squad ${player.squad} not all confirmed yet`);
             socket.emit('squad_advance_denied', {

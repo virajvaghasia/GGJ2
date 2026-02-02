@@ -43,8 +43,14 @@ export function Tumbler({
     const completedRef = useRef(false);
     const [permissionGranted, setPermissionGranted] = useState(false);
     const [permissionError, setPermissionError] = useState<string | null>(null);
+    const [needsPermission, setNeedsPermission] = useState(false);
     const [isPermanentlyDenied, setIsPermanentlyDenied] = useState(false);
     const [isLandscape, setIsLandscape] = useState(false);
+
+    useEffect(() => {
+        console.log('[TUMBLER] Mount');
+        return () => console.log('[TUMBLER] Unmount');
+    }, []);
 
     // Check if device is in landscape mode
     useEffect(() => {

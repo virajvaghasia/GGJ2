@@ -253,7 +253,9 @@ export const useGameStore = create<GameState>((set, get) => ({
         // DEV: View change broadcast - syncs all players
         socket.on('view_change', (data: { view: GameView }) => {
             console.log('[SOCKET] View change received:', data.view);
+            console.log('[SOCKET] Current stack trace:', new Error().stack);
             set({ currentView: data.view });
+            console.log('[SOCKET] Set currentView to:', get().currentView);
         });
 
         // Heartbeat
